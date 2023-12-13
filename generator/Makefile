@@ -16,11 +16,19 @@ MIB_PATH := 'mibs'
 
 CURL_OPTS ?= -L --no-progress-meter --retry 3 --retry-delay 3 --fail
 
+REPO_TAG ?= $(shell git rev-parse --abbrev-ref HEAD)
+
 DOCKER_IMAGE_NAME ?= snmp-generator
-DOCKER_IMAGE_TAG  ?= $(subst /,-,$(shell git rev-parse --abbrev-ref HEAD))
+DOCKER_IMAGE_TAG  ?= $(subst /,-,$(REPO_TAG))
 DOCKER_REPO       ?= prom
 
 SANITIZED_DOCKER_IMAGE_TAG := $(subst +,-,$(DOCKER_IMAGE_TAG))
+
+SELINUX_ENABLED := $(shell cat /sys/fs/selinux/enforce 2> /dev/null || echo 0)
+
+ifeq ($(SELINUX_ENABLED),1)
+  DOCKER_VOL_OPTS ?= :z
+endif
 
 APC_URL           := https://download.schneider-electric.com/files?p_enDocType=Firmware&p_File_Name=powernet451.mib&p_Doc_Ref=APC_POWERNETMIB_451_EN
 ARISTA_URL        := https://www.arista.com/assets/data/docs/MIBS
@@ -28,9 +36,9 @@ CISCO_URL         := https://raw.githubusercontent.com/cisco/cisco-mibs/2d465cce
 IANA_CHARSET_URL  := https://www.iana.org/assignments/ianacharset-mib/ianacharset-mib
 IANA_IFTYPE_URL   := https://www.iana.org/assignments/ianaiftype-mib/ianaiftype-mib
 IANA_PRINTER_URL  := https://www.iana.org/assignments/ianaprinter-mib/ianaprinter-mib
-KEEPALIVED_URL    := https://raw.githubusercontent.com/acassen/keepalived/v2.2.7/doc/KEEPALIVED-MIB.txt
-VRRP_URL          := https://raw.githubusercontent.com/acassen/keepalived/v2.2.7/doc/VRRP-MIB.txt
-VRRPV3_URL        := https://raw.githubusercontent.com/acassen/keepalived/v2.2.7/doc/VRRPv3-MIB.txt
+KEEPALIVED_URL    := https://raw.githubusercontent.com/acassen/keepalived/v2.2.8/doc/KEEPALIVED-MIB.txt
+VRRP_URL          := https://raw.githubusercontent.com/acassen/keepalived/v2.2.8/doc/VRRP-MIB.txt
+VRRPV3_URL        := https://raw.githubusercontent.com/acassen/keepalived/v2.2.8/doc/VRRPv3-MIB.txt
 KEMP_LM_URL       := https://kemptechnologies.com/files/packages/current/LM_mibs.zip
 MIKROTIK_URL      := 'https://box.mikrotik.com/f/a41daf63d0c14347a088/?dl=1'
 NEC_URL           := https://jpn.nec.com/univerge/ix/Manual/MIB
@@ -47,6 +55,8 @@ RARITAN_URL       := https://cdn.raritan.com/download/PX/v1.5.20/PDU-MIB.txt
 RARITAN2_URL      := https://cdn1.raritan.com/download/src-g2/4.0.20/PDU2_MIB_4.0.20_49038.txt
 INFRAPOWER_URL    := https://www.austin-hughes.com/wp-content/uploads/2021/05/IPD-03-S-MIB.zip
 LIEBERT_URL       := https://www.vertiv.com/globalassets/documents/software/monitoring/lgpmib-win_rev16_299461_0.zip
+READYNAS_URL      := https://www.downloads.netgear.com/files/ReadyNAS/READYNAS-MIB.txt
+READYDATAOS_URL   := https://www.circitor.fr/Mibs/Mib/R/READYDATAOS-MIB.mib
 
 CYBERPOWER_VERSION := 2.10
 CYBERPOWER_URL     := https://dl4jz3rbrsfum.cloudfront.net/software/CyberPower_MIB_v$(CYBERPOWER_VERSION).MIB.zip
@@ -66,7 +76,9 @@ clean:
 		$(MIBDIR)/.net-snmp \
 		$(MIBDIR)/.paloalto_panos \
 		$(MIBDIR)/.synology \
-		$(MIBDIR)/.kemp-lm
+		$(MIBDIR)/.kemp-lm \
+		$(MIBDIR)/readynas \
+		$(MIBDIR)/readydataos
 
 generator: *.go
 	go build
@@ -79,11 +91,11 @@ parse_errors: generator mibs
 
 .PHONY: docker
 docker:
-	docker build -t "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME):$(SANITIZED_DOCKER_IMAGE_TAG)" .
+	docker build --build-arg REPO_TAG="$(REPO_TAG)" -t "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME):$(SANITIZED_DOCKER_IMAGE_TAG)" .
 
 .PHONY: docker-generate
 docker-generate: docker mibs
-	docker run -ti -v "${PWD}:/opt/" "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME):$(SANITIZED_DOCKER_IMAGE_TAG)" generate
+	docker run -ti -v "${PWD}:/opt$(DOCKER_VOL_OPTS)" "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME):$(SANITIZED_DOCKER_IMAGE_TAG)" generate
 
 .PHONY: docker-publish
 docker-publish:
@@ -95,6 +107,8 @@ docker-tag-latest:
 
 mibs: \
   $(MIBDIR)/apc-powernet-mib \
+  $(MIBDIR)/readynas \
+  $(MIBDIR)/readydataos \
   $(MIBDIR)/AIRESPACE-REF-MIB \
   $(MIBDIR)/AIRESPACE-WIRELESS-MIB \
   $(MIBDIR)/ARISTA-ENTITY-SENSOR-MIB \
@@ -334,3 +348,11 @@ $(MIBDIR)/EAP.MIB $(MIBDIR)/EAP-Client.MIB:
 	@mv -v $(MIBDIR)/TPLINK.mib $(MIBDIR)/EAP.MIB
 	@mv -v $(MIBDIR)/client.mib $(MIBDIR)/EAP-Client.MIB
 	@rm -v $(TMP)
+
+$(MIBDIR)/readynas:
+	@echo ">> Downloading readynas"
+	@curl $(CURL_OPTS) -o $(MIBDIR)/readynas "$(READYNAS_URL)"
+
+$(MIBDIR)/readydataos:
+	@echo ">> Downloading readydataos"
+	@curl $(CURL_OPTS) -o $(MIBDIR)/readydataos "$(READYDATAOS_URL)"
